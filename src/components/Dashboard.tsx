@@ -1,3 +1,4 @@
+// src/components/Dashboard.tsx
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
@@ -222,7 +223,7 @@ function WatchlistCard({ company, selected, onClick }: { company:BiotechCompany;
       </div>
       <p style={{ fontSize:12, color:C.textSecondary, margin:"0 0 10px", lineHeight:1.5 }}>{company.name}</p>
       <div style={{ display:"flex", gap:5, flexWrap:"wrap", marginBottom:10 }}>
-        {company.tags.slice(0,2).map(t => <Tag key={t} label={t} />)}
+        {company.tags?.slice(0,2).map(t => <Tag key={t} label={t} />)}
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
         <span style={{ fontSize:11, color:C.textMuted }}>{company.marketCap}</span>
@@ -279,6 +280,11 @@ export default function Dashboard() {
   const [isEasyMode, setIsEasyMode]       = useState(true);
   const [query, setQuery]                 = useState("");
   const [dropOpen, setDropOpen]           = useState(false);
+  
+  // NEW GLOBAL SEARCH STATES
+  const [isSearching, setIsSearching]     = useState(false);
+  const [searchError, setSearchError]     = useState<string|null>(null);
+
   const searchRef                         = useRef<HTMLDivElement>(null);
   const detailRef                         = useRef<HTMLDivElement>(null);
 
@@ -296,15 +302,57 @@ export default function Dashboard() {
     ? mockBiotechCompanies.filter(c =>
         c.ticker.toLowerCase().includes(query.toLowerCase()) ||
         c.name.toLowerCase().includes(query.toLowerCase()) ||
-        c.tags.some(t => t.toLowerCase().includes(query.toLowerCase()))
+        (c.tags && c.tags.some(t => t.toLowerCase().includes(query.toLowerCase())))
       )
     : [];
 
   const scrollToDetail = () => detailRef.current?.scrollIntoView({ behavior:"smooth", block:"start" });
 
   const selectCompany = (c: BiotechCompany) => {
-    setSelected(c); setQuery(""); setDropOpen(false);
+    setSelected(c); setQuery(""); setDropOpen(false); setSearchError(null);
     setTimeout(scrollToDetail, 80);
+  };
+
+  // NEW: Global Fetch Function triggered by pressing 'Enter'
+  const handleGlobalSearch = async (tickerToSearch: string) => {
+    const cleanTicker = tickerToSearch.trim().toUpperCase();
+    if (!cleanTicker) return;
+
+    setIsSearching(true);
+    setSearchError(null);
+
+    try {
+      const res = await fetch(`/api/stock?ticker=${cleanTicker}&type=overview`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setSearchError(data.error || "Ticker profile execution halted.");
+        setIsSearching(false);
+        return;
+      }
+
+      const discoveredCompany: BiotechCompany = {
+        id: `dynamic-${Date.now()}`,
+        name: data.name,
+        ticker: cleanTicker,
+        marketCap: data.marketCap,
+        riskScore: "MEDIUM",
+        drugName: "Primary Pipeline Asset",
+        targetCondition: "Indication Discovery Pending",
+        rawMechanism: data.description,
+        simplifiedMechanism: "Processing AI translation matrix...",
+        currentPhase: 1,
+        pipeline: [],
+        tags: ["Global Market", "Equities"],
+        nextCatalystDate: "TBD",
+        catalystDescription: "Awaiting secondary profile updates."
+      };
+
+      selectCompany(discoveredCompany);
+    } catch (err) {
+      setSearchError("Global directory connection timeout.");
+    }
+    setIsSearching(false);
   };
 
   useEffect(() => {
@@ -438,6 +486,13 @@ export default function Dashboard() {
                     value={query}
                     onChange={e => { setQuery(e.target.value); setDropOpen(true); }}
                     onFocus={() => setDropOpen(true)}
+                    // NEW: The 'Enter' key detection to trigger live Alpha Vantage search!
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleGlobalSearch(query);
+                      }
+                    }}
                     placeholder="Search ticker, company, or therapy type…"
                     style={{
                       flex:1, background:"transparent", border:"none",
@@ -482,12 +537,25 @@ export default function Dashboard() {
                     ))}
                   </div>
                 )}
+                
+                {/* NEW: Updated Dropdown when searching global missing tickers */}
                 {dropOpen && query && searchResults.length === 0 && (
                   <div style={{
                     position:"absolute", top:"calc(100% + 8px)", left:0, right:0, zIndex:100,
                     background:C.bgSurface, border:`1px solid ${C.border}`, borderRadius:12,
                     padding:"20px", textAlign:"center", color:C.textMuted, fontSize:13,
-                  }}>No results for "{query}"</div>
+                  }}>
+                    {isSearching ? (
+                      <span style={{ color: C.accent, animation: "pulse 1.5s infinite" }}>Querying global database for "{query}"...</span>
+                    ) : searchError ? (
+                      <span style={{ color: C.red }}>{searchError}</span>
+                    ) : (
+                      <>
+                        No local results for "{query}". <br/>
+                        <span style={{ color: C.textPrimary, fontWeight: 'bold', marginTop: '8px', display: 'inline-block' }}>Press 'Enter' to search global database.</span>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -593,7 +661,7 @@ export default function Dashboard() {
                       </div>
                       <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
                         <RiskBadge risk={selected.riskScore} />
-                        {selected.tags.map(t => <Tag key={t} label={t} />)}
+                        {selected.tags?.map(t => <Tag key={t} label={t} />)}
                       </div>
                     </div>
                     {/* Live price */}
